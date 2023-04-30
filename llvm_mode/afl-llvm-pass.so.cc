@@ -131,19 +131,24 @@ bool AFLCoverage::runOnModule(Module &M) {
 
       /* Load prev_loc */
 
-      LoadInst *PrevLoc = IRB.CreateLoad(AFLPrevLoc);
-      PrevLoc->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));
-      Value *PrevLocCasted = IRB.CreateZExt(PrevLoc, IRB.getInt32Ty());
+      LoadInst *PrevLoc = IRB.CreateLoad(AFLPrevLoc);// %1 = load i32, i32* @AFLPrevLoc, align 4
+      //  %1 = load i32, i32* @AFLPrevLoc, align 4, !nosanitize !0
+      PrevLoc->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));// sanitizer 不允许对这段代码处理
+      Value *PrevLocCasted = IRB.CreateZExt(PrevLoc, IRB.getInt32Ty());// %2 = zext i32 %1 to i32
 
       /* Load SHM pointer */
 
-      LoadInst *MapPtr = IRB.CreateLoad(AFLMapPtr);
+      LoadInst *MapPtr = IRB.CreateLoad(AFLMapPtr);// %1 = load i32, i32* @AFLMapPtr, align 4
       MapPtr->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));
+      // MapPtrIdx = &MapPtr[PrevLocCasted ^ CurLoc]
       Value *MapPtrIdx =
-          IRB.CreateGEP(MapPtr, IRB.CreateXor(PrevLocCasted, CurLoc));
+          IRB.CreateGEP(MapPtr, IRB.CreateXor(PrevLocCasted, CurLoc));// CreateGetElementPtr
 
       /* Update bitmap */
-
+     
+      // val = *MapPtrIdx
+      // val += 1
+      // *MapPtrIdx = val
       LoadInst *Counter = IRB.CreateLoad(MapPtrIdx);
       Counter->setMetadata(M.getMDKindID("nosanitize"), MDNode::get(C, None));
       Value *Incr = IRB.CreateAdd(Counter, ConstantInt::get(Int8Ty, 1));
