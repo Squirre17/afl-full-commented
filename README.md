@@ -75,4 +75,5 @@ top_rated表示这着一个路径会被哪个testcase触发 总是指向最优�
 
 
 # TODO
-persistent mode
+- persistent mode
+- qemu mode
