@@ -1419,7 +1419,7 @@ static void setup_post(void) {
   dh = dlopen(fn, RTLD_NOW);
   if (!dh) FATAL("%s", dlerror());
 
-  post_handler = dlsym(dh, "afl_postprocess");
+  post_handler = dlsym(dh, "afl_postprocess");// 这个后处理器的handler会在common_fuzz_stuff中对tc进行一次处理 比如解压缩？
   if (!post_handler) FATAL("Symbol 'afl_postprocess' not found.");
 
   /* Do a quick test. It's better to segfault now than later =) */
@@ -2393,7 +2393,7 @@ static u8 run_target(char** argv, u32 timeout) {
 
     }
 
-  } else {
+  } else {// dumb_mode = 2 也就是有dummy forksrv 
 
     s32 res;
 
@@ -4575,7 +4575,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf) {
 
   /* Select initial chunk len, starting with large steps. */
 
-  len_p2 = next_p2(q->len);
+  len_p2 = next_p2(q->len);// 向上对齐 2^n 比如len是1000 就返回1024
 
   remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
 
@@ -4595,8 +4595,16 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf) {
 
       u32 trim_avail = MIN(remove_len, q->len - remove_pos);
       u32 cksum;
-
-      write_with_gap(in_buf, q->len, remove_pos, trim_avail);
+      /*
+        |<-                    testcase                 ->|
+        |-------------------------------------------------|
+        |                  |<---trim_avail--->|
+                           |                  |
+                       remove_pos             |
+                           |                  |
+                           |<---all remove--->|
+      */
+      write_with_gap(in_buf, q->len, remove_pos, trim_avail);// 写入out_file
 
       fault = run_target(argv, exec_tmout);
       trim_execs++;
@@ -4612,7 +4620,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf) {
          best-effort pass, so it's not a big deal if we end up with false
          negatives every now and then. */
 
-      if (cksum == q->exec_cksum) {
+      if (cksum == q->exec_cksum) {// cksum没变说明路径没变 这是一次有效的trim
 
         u32 move_tail = q->len - remove_pos - trim_avail;
 
@@ -4625,7 +4633,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf) {
         /* Let's save a clean trace, which will be needed by
            update_bitmap_score once we're done with the trimming stuff. */
 
-        if (!needs_write) {
+        if (!needs_write) {// 需要将trim后的tc写回 这里只需要写一次 因为如果要写回那么要确保每一次的trace_bits都不变
 
           needs_write = 1;
           memcpy(clean_trace, trace_bits, MAP_SIZE);
@@ -4682,7 +4690,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   u8 fault;
 
-  if (post_handler) {
+  if (post_handler) {// 如果指定了 postprocessor 提前处理一遍tc
 
     out_buf = post_handler(out_buf, &len);
     if (!out_buf || !len) return 0;
@@ -5149,7 +5157,7 @@ static u8 fuzz_one(char** argv) {
    * TRIMMING *
    ************/
 
-  if (!dumb_mode && !queue_cur->trim_done) {
+  if (!dumb_mode && !queue_cur->trim_done) {// dumb模式下无法获得路径反馈 自然无法进行需要路径反馈的trim
 
     u8 res = trim_case(argv, queue_cur, in_buf);
 
@@ -5182,7 +5190,7 @@ static u8 fuzz_one(char** argv) {
      testing in earlier, resumed runs (passed_det). */
 
   if (skip_deterministic || queue_cur->was_fuzzed || queue_cur->passed_det)
-    goto havoc_stage;
+    goto havoc_stage;// 我觉得这里的想法是 既然程序无法是deterministic的 那么通过bitflip的路径变化就没意义了 所以直接去havoc
 
   /* Skip deterministic fuzzing if exec path checksum puts this out of scope
      for this master instance. */
@@ -6151,7 +6159,7 @@ skip_extras:
    * RANDOM HAVOC *
    ****************/
 
-havoc_stage:
+havoc_stage:// 随机变异阶段
 
   stage_cur_byte = -1;
 
@@ -6165,7 +6173,7 @@ havoc_stage:
     stage_max   = (doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
                   perf_score / havoc_div / 100;
 
-  } else {
+  } else {// splice 
 
     static u8 tmp[32];
 
