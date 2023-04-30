@@ -172,7 +172,7 @@ EXP_ST u32 queued_paths,              /* Total number of queued testcases */
            pending_not_fuzzed,        /* Queued but not done yet          */
            pending_favored,           /* Pending favored paths            */
            cur_skipped_paths,         /* Abandoned inputs in cur cycle    */
-           cur_depth,                 /* Current path depth               */
+           cur_depth,                 /* Current path depth               */// TODO:
            max_depth,                 /* Max path depth                   */
            useless_at_start,          /* Number of useless starting paths */
            var_byte_count,            /* Bitmap bytes with var behavior   */
@@ -246,7 +246,7 @@ struct queue_entry {
   u8  cal_failed,                     /* Calibration failed?              */
       trim_done,                      /* Trimmed?                         */
       was_fuzzed,                     /* Had any fuzzing done yet?        */
-      passed_det,                     /* Deterministic stages passed?     */
+      passed_det,                     /* Deterministic stages passed?     */ // TODO: what is det stage
       has_new_cov,                    /* Triggers new coverage?           */
       var_behavior,                   /* Variable behavior?               */
       favored,                        /* Currently favored?               */
@@ -471,7 +471,7 @@ static void bind_to_free_cpu(void) {
       /* Processes without VmSize are probably kernel tasks. */
 
       if (!strncmp(tmp, "VmSize:\t", 8)) has_vmsize = 1;
-
+      // Cpus_allowed_list:  0-127 => 表示可用的cpu编号
       if (!strncmp(tmp, "Cpus_allowed_list:\t", 19) &&
           !strchr(tmp, '-') && !strchr(tmp, ',') &&
           sscanf(tmp + 19, "%u", &hval) == 1 && hval < sizeof(cpu_used) &&
@@ -770,25 +770,25 @@ static void mark_as_variable(struct queue_entry* q) {
 /* Mark / unmark as redundant (edge-only). This is not used for restoring state,
    but may be useful for post-processing datasets. */
 
-static void mark_as_redundant(struct queue_entry* q, u8 state) {
+static void mark_as_redundant(struct queue_entry* q, u8 state) {// state = ! q->favored
 
   u8* fn;
   s32 fd;
 
-  if (state == q->fs_redundant) return;
+  if (state == q->fs_redundant) return;// 如果q是favor的 redundant是0 就返回 如果q不是favor的 redundant是1 也返回
 
-  q->fs_redundant = state;
+  q->fs_redundant = state;// 简单来说 就是 redundant + favored == 1
 
   fn = strrchr(q->fname, '/');
   fn = alloc_printf("%s/queue/.state/redundant_edges/%s", out_dir, fn + 1);
 
-  if (state) {
+  if (state) {// 如果q不favor 那么就创建一个文件标记为redundant
 
     fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0) PFATAL("Unable to create '%s'", fn);
     close(fd);
 
-  } else {
+  } else {// 如果q favor 且以前标记为redundant了 那么就删掉这个标记的文件
 
     if (unlink(fn)) PFATAL("Unable to remove '%s'", fn);
 
@@ -812,7 +812,7 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det) {
 
   if (q->depth > max_depth) max_depth = q->depth;
 
-  if (queue_top) {
+  if (queue_top) {// 这里可以看出是加到队列后面 而top指向队尾
 
     queue_top->next = q;
     queue_top = q;
@@ -908,8 +908,8 @@ static inline u8 has_new_bits(u8* virgin_map) {
 
 #ifdef WORD_SIZE_64
 
-  u64* current = (u64*)trace_bits;
-  u64* virgin  = (u64*)virgin_map;
+  u64* current = (u64*)trace_bits;// TODO: 个人感觉这里 都是比特图而不是位图
+  u64* virgin  = (u64*)virgin_map;// 
 
   u32  i = (MAP_SIZE >> 3);
 
@@ -930,9 +930,10 @@ static inline u8 has_new_bits(u8* virgin_map) {
        that have not been already cleared from the virgin map - since this will
        almost always be the case. */
 
+    // 当前路径命中 且 命中次数能够触发未探索的路径
     if (unlikely(*current) && unlikely(*current & *virgin)) {
 
-      if (likely(ret < 2)) {
+      if (likely(ret < 2)) {// 还没出现新路径 
 
         u8* cur = (u8*)current;
         u8* vir = (u8*)virgin;
@@ -941,7 +942,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
            bytes in current[] are pristine in virgin[]. */
 
 #ifdef WORD_SIZE_64
-
+        // == 的优先级更大  (vir[0] == 0xff)代表着这条路径没有被探索过 cur出现了代表着 我没有探索过的路径有了新发现 所以返回2
         if ((cur[0] && vir[0] == 0xff) || (cur[1] && vir[1] == 0xff) ||
             (cur[2] && vir[2] == 0xff) || (cur[3] && vir[3] == 0xff) ||
             (cur[4] && vir[4] == 0xff) || (cur[5] && vir[5] == 0xff) ||
@@ -957,7 +958,7 @@ static inline u8 has_new_bits(u8* virgin_map) {
 #endif /* ^WORD_SIZE_64 */
 
       }
-
+      // !! for each bit that has been set in trace_bits and cleared in virgin_map
       *virgin &= ~*current;
 
     }
@@ -1008,14 +1009,14 @@ static u32 count_bits(u8* mem) {
 
 #define FF(_b)  (0xff << ((_b) << 3))
 
-/* Count the number of bytes set in the bitmap. Called fairly sporadically,
+/* Count the number of bytes set in the bitmap. Called fairly sporadically(零星 偶发的),
    mostly to update the status screen or calibrate and examine confirmed
    new paths. */
 
 static u32 count_bytes(u8* mem) {
 
   u32* ptr = (u32*)mem;
-  u32  i   = (MAP_SIZE >> 2);
+  u32  i   = (MAP_SIZE >> 2);// 4 bytes 一组
   u32  ret = 0;
 
   while (i--) {
@@ -1023,10 +1024,10 @@ static u32 count_bytes(u8* mem) {
     u32 v = *(ptr++);
 
     if (!v) continue;
-    if (v & FF(0)) ret++;
-    if (v & FF(1)) ret++;
-    if (v & FF(2)) ret++;
-    if (v & FF(3)) ret++;
+    if (v & FF(0)) ret++;// v & 0x000000ff
+    if (v & FF(1)) ret++;// v & 0x0000ff00
+    if (v & FF(2)) ret++;// v & 0x00ff0000
+    if (v & FF(3)) ret++;// v & 0xff000000
 
   }
 
@@ -1072,13 +1073,13 @@ static u32 count_non_255_bytes(u8* mem) {
 static const u8 simplify_lookup[256] = { 
 
   [0]         = 1,
-  [1 ... 255] = 128
+  [1 ... 255] = 128  // 0x80
 
 };
 
 #ifdef WORD_SIZE_64
 
-static void simplify_trace(u64* mem) {
+static void simplify_trace(u64* mem) {// 将比特图简化成只有两种值
 
   u32 i = MAP_SIZE >> 3;
 
@@ -1252,7 +1253,7 @@ static void minimize_bits(u8* dst, u8* src) {
 }
 
 
-/* When we bump into a new path, we call this to see if the path appears
+/* When we bump into(无意间遇到) a new path, we call this to see if the path appears
    more "favorable" than any of the existing ones. The purpose of the
    "favorables" is to have a minimal set of paths that trigger all the bits
    seen in the bitmap so far, and focus on fuzzing them at the expense of
@@ -1265,16 +1266,16 @@ static void minimize_bits(u8* dst, u8* src) {
 static void update_bitmap_score(struct queue_entry* q) {
 
   u32 i;
-  u64 fav_factor = q->exec_us * q->len;
+  u64 fav_factor = q->exec_us * q->len;// 数据长度越短 时间越短越favor
 
   /* For every byte set in trace_bits[], see if there is a previous winner,
      and how it compares to us. */
 
   for (i = 0; i < MAP_SIZE; i++)
 
-    if (trace_bits[i]) {
+    if (trace_bits[i]) {// 能触发这个路径
 
-       if (top_rated[i]) {
+       if (top_rated[i]) {// 每一个路径就有一个top_rated 指向对应的queue_entry
 
          /* Faster-executing or smaller test cases are favored. */
 
@@ -1283,8 +1284,8 @@ static void update_bitmap_score(struct queue_entry* q) {
          /* Looks like we're going to win. Decrease ref count for the
             previous winner, discard its trace_bits[] if necessary. */
 
-         if (!--top_rated[i]->tc_ref) {
-           ck_free(top_rated[i]->trace_mini);
+         if (!--top_rated[i]->tc_ref) {       // ref字段只在这里和下面使用了两次 因为多个top_rated可以指向一个queue_entry
+           ck_free(top_rated[i]->trace_mini); // 粒度为1bit的真位图 trace_bits本质上是个比特图
            top_rated[i]->trace_mini = 0;
          }
 
@@ -1297,7 +1298,7 @@ static void update_bitmap_score(struct queue_entry* q) {
 
        if (!q->trace_mini) {
          q->trace_mini = ck_alloc(MAP_SIZE >> 3);
-         minimize_bits(q->trace_mini, trace_bits);
+         minimize_bits(q->trace_mini, trace_bits);// 生成真位图
        }
 
        score_changed = 1;
@@ -1311,12 +1312,14 @@ static void update_bitmap_score(struct queue_entry* q) {
    goes over top_rated[] entries, and then sequentially grabs winners for
    previously-unseen bytes (temp_v) and marks them as favored, at least
    until the next run. The favored entries are given more air time during
-   all fuzzing steps. */
+   all fuzzing steps. 
+   根据top_rated上的位图去找到哪些testcase能触发新的路径
+   */
 
 static void cull_queue(void) {
 
   struct queue_entry* q;
-  static u8 temp_v[MAP_SIZE >> 3];
+  static u8 temp_v[MAP_SIZE >> 3];// 真正的位图
   u32 i;
 
   if (dumb_mode || !score_changed) return;
@@ -1339,7 +1342,7 @@ static void cull_queue(void) {
      If yes, and if it has a top_rated[] contender, let's use it. */
 
   for (i = 0; i < MAP_SIZE; i++)
-    if (top_rated[i] && (temp_v[i >> 3] & (1 << (i & 7)))) {
+    if (top_rated[i] && (temp_v[i >> 3] & (1 << (i & 7)))) {// i代表一个路径 这个路径能被queue上的testcase触发 且没被发现过
 
       u32 j = MAP_SIZE >> 3;
 
@@ -1347,9 +1350,9 @@ static void cull_queue(void) {
 
       while (j--) 
         if (top_rated[i]->trace_mini[j])
-          temp_v[j] &= ~top_rated[i]->trace_mini[j];
+          temp_v[j] &= ~top_rated[i]->trace_mini[j];// 将触发这个路径的testcase 所能走到所有路径的bit位置0
 
-      top_rated[i]->favored = 1;
+      top_rated[i]->favored = 1;// 既然你这个testcase能触发我没走过的路径 那自然就是favorable的
       queued_favored++;
 
       if (!top_rated[i]->was_fuzzed) pending_favored++;
@@ -1358,7 +1361,7 @@ static void cull_queue(void) {
 
   q = queue;
 
-  while (q) {
+  while (q) {// 记录状态改变 例如以前是redundant的现在favor
     mark_as_redundant(q, !q->favored);
     q = q->next;
   }
@@ -1429,7 +1432,7 @@ static void setup_post(void) {
 
 
 /* Read all testcases from the input directory, then queue them for testing.
-   Called at startup. */
+   Called at startup. : 打开in下面的所有case 加入到queue中去 */
 
 static void read_testcases(void) {
 
@@ -1486,7 +1489,7 @@ static void read_testcases(void) {
     if (lstat(fn, &st) || access(fn, R_OK))
       PFATAL("Unable to access '%s'", fn);
 
-    /* This also takes care of . and .. */
+    /* This also takes care of . and .. : 不是reg文件 没大小 跳过 */
 
     if (!S_ISREG(st.st_mode) || !st.st_size || strstr(fn, "/README.testcases")) {
 
@@ -1508,7 +1511,7 @@ static void read_testcases(void) {
     if (!access(dfn, F_OK)) passed_det = 1;
     ck_free(dfn);
 
-    add_to_queue(fn, st.st_size, passed_det);
+    add_to_queue(fn, st.st_size, passed_det);// 重点
 
   }
 
@@ -1523,7 +1526,6 @@ static void read_testcases(void) {
          "    input directory.\n");
 
     FATAL("No usable test cases in '%s'", in_dir);
-
   }
 
   last_path_time = 0;
@@ -1686,7 +1688,9 @@ static void load_extras_file(u8* fname, u32* min_len, u32* max_len,
 }
 
 
-/* Read extras from the extras directory and sort them by size. */
+/* Read extras from the extras directory and sort them by size. 
+   从-x指定的token文件目录下以一个文件作为一个extra进行读入
+*/
 
 static void load_extras(u8* dir) {
 
@@ -1798,7 +1802,7 @@ static inline u8 memcmp_nocase(u8* m1, u8* m2, u32 len) {
 }
 
 
-/* Maybe add automatic extra. */
+/* Maybe add automatic extra. 如果mem表示的token不冲突不重复 就加入a_extras */
 
 static void maybe_add_auto(u8* mem, u32 len) {
 
@@ -1811,7 +1815,7 @@ static void maybe_add_auto(u8* mem, u32 len) {
   /* Skip runs of identical bytes. */
 
   for (i = 1; i < len; i++)
-    if (mem[0] ^ mem[i]) break;
+    if (mem[0] ^ mem[i]) break;// 找到和第一个字节不同的idx 跳出
 
   if (i == len) return;
 
@@ -1910,7 +1914,7 @@ static void save_auto(void) {
 
   u32 i;
 
-  if (!auto_changed) return;
+  if (!auto_changed) return;// 如果之前没用加载过auto extra 就直接返回
   auto_changed = 0;
 
   for (i = 0; i < MIN(USE_AUTO_EXTRAS, a_extras_cnt); i++) {
@@ -1941,7 +1945,7 @@ static void load_auto(void) {
   for (i = 0; i < USE_AUTO_EXTRAS; i++) {
 
     u8  tmp[MAX_AUTO_EXTRA + 1];
-    u8* fn = alloc_printf("%s/.state/auto_extras/auto_%06u", in_dir, i);
+    u8* fn = alloc_printf("%s/.state/auto_extras/auto_%06u", in_dir, i);// 每一个文件代表一个token 应该
     s32 fd, len;
 
     fd = open(fn, O_RDONLY, 0600);
@@ -2017,7 +2021,7 @@ EXP_ST void init_forkserver(char** argv) {
 
   if (forksrv_pid < 0) PFATAL("fork() failed");
 
-  if (!forksrv_pid) {
+  if (!forksrv_pid) {// 子进程
 
     struct rlimit r;
 
@@ -2062,10 +2066,10 @@ EXP_ST void init_forkserver(char** argv) {
     /* Isolate the process and configure standard descriptors. If out_file is
        specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
 
-    setsid();
+    setsid();// 创建一个新的session
 
-    dup2(dev_null_fd, 1);
-    dup2(dev_null_fd, 2);
+    dup2(dev_null_fd, 1);//stdout 指向/dev/null
+    dup2(dev_null_fd, 2);//stderr 指向/dev/null
 
     if (out_file) {
 
@@ -2080,8 +2084,8 @@ EXP_ST void init_forkserver(char** argv) {
 
     /* Set up control and status pipes, close the unneeded original fds. */
 
-    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) PFATAL("dup2() failed");
-    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) PFATAL("dup2() failed");
+    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) PFATAL("dup2() failed");    // FORKSRV_FD     <-r-- ctlpipe
+    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) PFATAL("dup2() failed"); // FORKSRV_FD + 1 --w-> stpipe
 
     close(ctl_pipe[0]);
     close(ctl_pipe[1]);
@@ -2119,32 +2123,33 @@ EXP_ST void init_forkserver(char** argv) {
     /* Use a distinctive bitmap signature to tell the parent about execv()
        falling through. */
 
-    *(u32*)trace_bits = EXEC_FAIL_SIG;
+    *(u32*)trace_bits = EXEC_FAIL_SIG;// shm
     exit(0);
 
   }
+  // 父进程
 
   /* Close the unneeded endpoints. */
 
   close(ctl_pipe[0]);
   close(st_pipe[1]);
 
-  fsrv_ctl_fd = ctl_pipe[1];
-  fsrv_st_fd  = st_pipe[0];
+  // 父进程写控制信息给子进程 读子进程的状态
+  fsrv_ctl_fd = ctl_pipe[1];// child FORKSRV_FD     <-r-- ctlpipe <-w-- parent fsrv_ctl_fd
+  fsrv_st_fd  = st_pipe[0]; // child FORKSRV_FD + 1 --w-> stpipe  --r-> parent fsrv_st_fd
 
   /* Wait for the fork server to come up, but don't wait too long. */
 
   it.it_value.tv_sec = ((exec_tmout * FORK_WAIT_MULT) / 1000);
   it.it_value.tv_usec = ((exec_tmout * FORK_WAIT_MULT) % 1000) * 1000;
 
-  setitimer(ITIMER_REAL, &it, NULL);
+  setitimer(ITIMER_REAL, &it, NULL);// Real-time timer 计时器设置执行时间
 
-  rlen = read(fsrv_st_fd, &status, 4);
-
+  rlen = read(fsrv_st_fd, &status, 4);// 等待forkserver的信息到来 afl-as:__afl_forkserver 里面
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 0;
 
-  setitimer(ITIMER_REAL, &it, NULL);
+  setitimer(ITIMER_REAL, &it, NULL);// 第二次设置是停止计时器
 
   /* If we have a four-byte "hello" message from the server, we're all set.
      Otherwise, try to figure out what went wrong. */
@@ -2154,7 +2159,8 @@ EXP_ST void init_forkserver(char** argv) {
     return;
   }
 
-  if (child_timed_out)
+  // 下面就是失败场景了 失败可能性不大 不需要太care
+  if (child_timed_out)// 如果timeout 计时器会发送一个SIGALRM 被之前设置好的handle_timeout 捕获到 就会设置这个变量
     FATAL("Timeout while initializing fork server (adjusting -t may help)");
 
   if (waitpid(forksrv_pid, &status, 0) <= 0)
@@ -2566,7 +2572,15 @@ static void show_stats(void);
 
 /* Calibrate a new test case. This is done when processing the input directory
    to warn about flaky or otherwise problematic test cases early on; and when
-   new paths are discovered to detect variable behavior and so on. */
+   new paths are discovered to detect variable behavior and so on. 
+   flaky : "不稳定的"、"易出故障的"、"易变的" 等。在软件测试领域中，"flaky" 通常指的是测试用例的执行结果在不同的运行环境或次数下表现不一致的情况
+
+    1. 启动forksrv
+    2. 进行stage_max次对目标二进制的运行
+    3. 根据运行结果生成对应testcase的一些原信息 更新bitmap_score
+
+    总结 : 就是对着我们的testcase跑几下 看看效果
+   */
 
 static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
                          u32 handicap, u8 from_queue) {
@@ -2617,7 +2631,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
-    write_to_testcase(use_mem, q->len);
+    write_to_testcase(use_mem, q->len);// 写到cur_input里面去(这部分其实有个多余的overhead 先写入磁盘再读出来)
 
     fault = run_target(argv, use_tmout);
 
@@ -2627,6 +2641,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
     if (stop_soon || fault != crash_mode) goto abort_calibration;
 
     if (!dumb_mode && !stage_cur && !count_bytes(trace_bits)) {
+      // 非dumb模式 & 第一次运行 & shm中全是0 => FAULT_NOINST 鉴定为插桩失败
       fault = FAULT_NOINST;
       goto abort_calibration;
     }
@@ -2634,7 +2649,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
     cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
     if (q->exec_cksum != cksum) {
-
+      // virgin_bits 一开始被初始化全为1 在has_new_bits被更新
       hnb = has_new_bits(virgin_bits);
       if (hnb > new_bits) new_bits = hnb;
 
@@ -2646,7 +2661,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
           if (!var_bytes[i] && first_trace[i] != trace_bits[i]) {
 
-            var_bytes[i] = 1;
+            var_bytes[i] = 1;// 标记这一条路径可变
             stage_max    = CAL_CYCLES_LONG;
 
           }
@@ -2682,13 +2697,13 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
   total_bitmap_size += q->bitmap_size;
   total_bitmap_entries++;
 
-  update_bitmap_score(q);
+  update_bitmap_score(q);// 更新top_rated
 
   /* If this case didn't result in new output from the instrumentation, tell
      parent. This is a non-critical problem, but something to warn the user
      about. */
 
-  if (!dumb_mode && first_run && !fault && !new_bits) fault = FAULT_NOBITS;
+  if (!dumb_mode && first_run && !fault && !new_bits) fault = FAULT_NOBITS;// 这个queue没有触发新的路径
 
 abort_calibration:
 
@@ -2738,7 +2753,9 @@ static void check_map_coverage(void) {
 
 
 /* Perform dry run of all test cases to confirm that the app is working as
-   expected. This is done only for the initial inputs, and only once. */
+   expected. This is done only for the initial inputs, and only once. 
+   将queue上的testcase全跑一边 看看效果 
+   */
 
 static void perform_dry_run(char** argv) {
 
@@ -2779,7 +2796,7 @@ static void perform_dry_run(char** argv) {
 
       case FAULT_NONE:
 
-        if (q == queue) check_map_coverage();
+        if (q == queue) check_map_coverage();// 这个不是很care 一般不会到这里
 
         if (crash_mode) FATAL("Test case '%s' does *NOT* crash", fn);
 
@@ -2826,7 +2843,7 @@ static void perform_dry_run(char** argv) {
 
       case FAULT_CRASH:  
 
-        if (crash_mode) break;
+        if (crash_mode) break;// 处于crash mode 测试用例触发crash才是正常的
 
         if (skip_crashes) {
           WARNF("Test case results in a crash (skipping)");
@@ -2975,7 +2992,9 @@ static void link_or_copy(u8* old_path, u8* new_path) {
 static void nuke_resume_dir(void);
 
 /* Create hard links for input test cases in the output directory, choosing
-   good names and pivoting accordingly. */
+   good names and pivoting accordingly. 
+   对每个之前read_testcase放到queue上的样本，都进行一次名字的标准化 放到out目录下的queue中
+   */
 
 static void pivot_inputs(void) {
 
@@ -3000,7 +3019,10 @@ static void pivot_inputs(void) {
 #else
 #  define CASE_PREFIX "id_"
 #endif /* ^!SIMPLE_FILES */
-
+    /*
+        src 代表着这个样本是从queue中的第几个来的 而id只是代表着我生成的新样本的序号
+    */
+    // 如果输入的文件名字是这种格式 id:000000,src:000000,op:havoc,rep:8,+cov 就要从queue中找到它的parent (e.g. id:000000,orig:dummy)
     if (!strncmp(rsl, CASE_PREFIX, 3) &&
         sscanf(rsl + 3, "%06u", &orig_id) == 1 && orig_id == id) {
 
@@ -3017,8 +3039,8 @@ static void pivot_inputs(void) {
 
       if (src_str && sscanf(src_str + 1, "%06u", &src_id) == 1) {
 
-        struct queue_entry* s = queue;
-        while (src_id-- && s) s = s->next;
+        struct queue_entry* s = queue;     // 队列头
+        while (src_id-- && s) s = s->next; // 取得与src相对应的queue_entry
         if (s) q->depth = s->depth + 1;
 
         if (max_depth < q->depth) max_depth = q->depth;
@@ -3027,11 +3049,13 @@ static void pivot_inputs(void) {
 
     } else {
 
-      /* No dice - invent a new name, capturing the original one as a
-         substring. */
+      /* No dice(不行) - invent a new name, capturing the original one as a
+         substring. 
+         这里是testcase中读入的corpus 名字对不上id:开头 所以要复制过来 取个新名字 */
 
 #ifndef SIMPLE_FILES
-
+      
+      // id:000000,orig:dummy
       u8* use_name = strstr(rsl, ",orig:");
 
       if (use_name) use_name += 6; else use_name = rsl;
@@ -3045,15 +3069,15 @@ static void pivot_inputs(void) {
 
     }
 
-    /* Pivot to the new queue entry. */
+    /* Pivot to(切换到 转向) the new queue entry. :换个新名字 内容不变 */
 
     link_or_copy(q->fname, nfn);
     ck_free(q->fname);
     q->fname = nfn;
 
-    /* Make sure that the passed_det value carries over, too. */
+    /* Make sure that the passed_det value carries over(继承 传递), too. */
 
-    if (q->passed_det) mark_as_det_done(q);
+    if (q->passed_det) mark_as_det_done(q);// 就是在deterministic_done下创建个文件罢了
 
     q = q->next;
     id++;
@@ -3158,7 +3182,10 @@ static void write_crash_readme(void) {
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
-   entry is saved, 0 otherwise. */
+   entry is saved, 0 otherwise. 
+   
+   如果在has_new_bits有了新的结果的话就加到queue上去
+   */
 
 static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
@@ -3207,7 +3234,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
     fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0) PFATAL("Unable to create '%s'", fn);
-    ck_write(fd, mem, len, fn);
+    ck_write(fd, mem, len, fn);// 写回磁盘
     close(fd);
 
     keeping = 1;
@@ -3381,7 +3408,9 @@ static u32 find_start_position(void) {
 
 /* The same, but for timeouts. The idea is that when resuming sessions without
    -t given, we don't want to keep auto-scaling the timeout over and over
-   again to prevent it from growing due to random flukes. */
+   again to prevent it from growing due to random flukes.(“随机波动”、“偶然事件”、“意外情况”) 
+   如果是session resume 就从fuzzer_stats文件中提取timeout时间 不是就直接返回
+   */
 
 static void find_timeout(void) {
 
@@ -3391,7 +3420,7 @@ static void find_timeout(void) {
   s32 fd, i;
   u32 ret;
 
-  if (!resuming_fuzz) return;
+  if (!resuming_fuzz) return;// 通过`-i -`指定从老的session中恢复的时候 resuming_fuzz = 1
 
   if (in_place_resume) fn = alloc_printf("%s/fuzzer_stats", out_dir);
   else fn = alloc_printf("%s/../fuzzer_stats", in_dir);
@@ -3626,7 +3655,7 @@ static double get_runnable_processes(void) {
     res = val;
 
   } else {
-
+    // 平均滤波算法 用于平滑噪声信号并降低噪声对信号的干扰 将一段时间内的多个采样值取平均值作为输出信号值，从而消除短期内的随机波动。
     res = res * (1.0 - 1.0 / AVG_SMOOTHING) +
           ((double)val) * (1.0 / AVG_SMOOTHING);
 
@@ -3695,6 +3724,8 @@ static void maybe_delete_out_dir(void) {
 
 #ifndef __sun
 
+  // LOCK_EX : 排他锁 LOCK_NB : 非阻塞
+  // 如果加上了这个LOCK_NB且无法获取到锁，则flock()函数将不会阻塞等待锁的释放，而是立即返回，并设置errno为EWOULDBLOCK（资源已经被锁定）。
   if (flock(out_dir_fd, LOCK_EX | LOCK_NB) && errno == EWOULDBLOCK) {
 
     SAYF("\n" cLRD "[-] " cRST
@@ -3721,7 +3752,7 @@ static void maybe_delete_out_dir(void) {
 
     fclose(f);
 
-    /* Let's see how much work is at stake. */
+    /* Let's see how much work is at stake(岌岌可危). */
 
     if (!in_place_resume && last_update - start_time > OUTPUT_GRACE * 60) {
 
@@ -3749,7 +3780,7 @@ static void maybe_delete_out_dir(void) {
      incomplete due to an earlier abort, so we want to use the old _resume/
      dir instead, and we let rename() fail silently. */
 
-  if (in_place_resume) {
+  if (in_place_resume) {// 只有当使用了 `-i -` 的时候  才会置in_place_resume为1
 
     u8* orig_q = alloc_printf("%s/queue", out_dir);
 
@@ -3769,13 +3800,13 @@ static void maybe_delete_out_dir(void) {
 
   ACTF("Deleting old session data...");
 
-  /* Okay, let's get the ball rolling! First, we need to get rid of the entries
+  /* Okay, let's get the ball rolling(get the ball rolling 开始 着手做)! First, we need to get rid of the entries
      in <out_dir>/.synced/.../id:*, if any are present. */
 
   if (!in_place_resume) {
 
     fn = alloc_printf("%s/.synced", out_dir);
-    if (delete_files(fn, NULL)) goto dir_cleanup_failed;
+    if (delete_files(fn, NULL)) goto dir_cleanup_failed;// 删除 out/master/.synced 文件夹
     ck_free(fn);
 
   }
@@ -4998,7 +5029,11 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
-   skipped or bailed out. */
+   skipped or bailed out.
+
+   1. 如果当前的queue不是favor的话 就随机性跳过
+   2. 调用calibrate
+    */
 
 static u8 fuzz_one(char** argv) {
 
@@ -5021,16 +5056,16 @@ static u8 fuzz_one(char** argv) {
 
 #else
 
-  if (pending_favored) {
+  if (pending_favored) {// cull中 没用被fuzz过并且favor的testcase
 
     /* If we have any favored, non-fuzzed new arrivals in the queue,
        possibly skip to them at the expense of already-fuzzed or non-favored
        cases. */
 
-    if ((queue_cur->was_fuzzed || !queue_cur->favored) &&
+    if ((queue_cur->was_fuzzed || !queue_cur->favored) &&//有favor的tc还在后面等着 当前的tc已经fuzz过了且不favor 那么就随机跳过
         UR(100) < SKIP_TO_NEW_PROB) return 1;
 
-  } else if (!dumb_mode && !queue_cur->favored && queued_paths > 10) {
+  } else if (!dumb_mode && !queue_cur->favored && queued_paths > 10) {// 非dumb模式 + 当前的tc不favor + queue的索引在10开外
 
     /* Otherwise, still possibly skip non-favored cases, albeit less often.
        The odds of skipping stuff are higher for already-fuzzed inputs and
@@ -5084,7 +5119,7 @@ static u8 fuzz_one(char** argv) {
    * CALIBRATION (only if failed earlier on) *
    *******************************************/
 
-  if (queue_cur->cal_failed) {
+  if (queue_cur->cal_failed) {// calibrate failed
 
     u8 res = FAULT_TMOUT;
 
@@ -6690,7 +6725,9 @@ abandon_entry:
 }
 
 
-/* Grab interesting test cases from other fuzzers. */
+/* Grab interesting test cases from other fuzzers. 
+    本质上就是打开其他slave的文件夹然后把里面东西挨个拿来测一下 
+*/
 
 static void sync_fuzzers(char** argv) {
 
@@ -6719,7 +6756,7 @@ static void sync_fuzzers(char** argv) {
 
     /* Skip dot files and our own output directory. */
 
-    if (sd_ent->d_name[0] == '.' || !strcmp(sync_id, sd_ent->d_name)) continue;
+    if (sd_ent->d_name[0] == '.' || !strcmp(sync_id, sd_ent->d_name)) continue;// 如果这个目录下和自己名字一样也进不去 比如我是master必须要进slave
 
     /* Skip anything that doesn't have a queue/ subdirectory. */
 
@@ -6758,14 +6795,15 @@ static void sync_fuzzers(char** argv) {
       u8* path;
       s32 fd;
       struct stat st;
-
+      
+      // id:000003,src:000000,op:havoc,rep:32,+cov
       if (qd_ent->d_name[0] == '.' ||
           sscanf(qd_ent->d_name, CASE_PREFIX "%06u", &syncing_case) != 1 || 
           syncing_case < min_accept) continue;
 
       /* OK, sounds like a new one. Let's give it a try. */
 
-      if (syncing_case >= next_min_accept)
+      if (syncing_case >= next_min_accept) // syncing_case这里就是id
         next_min_accept = syncing_case + 1;
 
       path = alloc_printf("%s/%s", qd_path, qd_ent->d_name);
@@ -6799,7 +6837,7 @@ static void sync_fuzzers(char** argv) {
 
         if (stop_soon) return;
 
-        syncing_party = sd_ent->d_name;
+        syncing_party = sd_ent->d_name;// e.g. slave
         queued_imported += save_if_interesting(argv, mem, st.st_size, fault);
         syncing_party = 0;
 
@@ -6841,7 +6879,11 @@ static void handle_stop_sig(int sig) {
 
 
 /* Handle skip request (SIGUSR1). */
-
+/* 
+    skip_requested 是一个布尔变量，通常在Fuzzer主循环中使用，用于指示fuzzer是否已经请求跳过当前测试用例的执行。
+    如果该变量被设置为 true，则fuzzer会跳过当前测试用例，并立即开始下一轮循环。这个变量可以被fuzzer的控制逻辑使用，
+    比如当fuzzer检测到某些问题时，就可以设置此变量以快速绕过某些不必要的测试用例，从而提高fuzzer的效率和性能。
+*/
 static void handle_skipreq(int sig) {
 
   skip_requested = 1;
@@ -6891,7 +6933,7 @@ EXP_ST void check_binary(u8* fname) {
 
   } else {
 
-    while (env_path) {
+    while (env_path) {// 从PATH开始找这个可执行文件 这个多此一举其实 一般要求用户给fullpath不就行了
 
       u8 *cur_elem, *delim = strchr(env_path, ':');
 
@@ -6926,7 +6968,7 @@ EXP_ST void check_binary(u8* fname) {
 
   if (getenv("AFL_SKIP_BIN_CHECK")) return;
 
-  /* Check for blatant user errors. */
+  /* Check for blatant(公然的，显眼的) user errors. */
 
   if ((!strncmp(target_path, "/tmp/", 5) && !strchr(target_path + 5, '/')) ||
       (!strncmp(target_path, "/var/tmp/", 9) && !strchr(target_path + 9, '/')))
@@ -6965,13 +7007,13 @@ EXP_ST void check_binary(u8* fname) {
 
 #else
 
-  if (f_data[0] != 0xCF || f_data[1] != 0xFA || f_data[2] != 0xED)
+  if (f_data[0] != 0xCF || f_data[1] != 0xFA || f_data[2] != 0xED)   // elf 头
     FATAL("Program '%s' is not a 64-bit Mach-O binary", target_path);
 
 #endif /* ^!__APPLE__ */
 
   if (!qemu_mode && !dumb_mode &&
-      !memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
+      !memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {// 从二进制中找到 __AFL_SHM_ID这个字符串
 
     SAYF("\n" cLRD "[-] " cRST
          "Looks like the target binary is not instrumented! The fuzzer depends on\n"
@@ -7037,7 +7079,7 @@ EXP_ST void check_binary(u8* fname) {
 
 
 /* Trim and possibly create a banner for the run. */
-
+// 传入的是待测程序名字 也没啥用
 static void fix_up_banner(u8* name) {
 
   if (!use_banner) {
@@ -7077,7 +7119,8 @@ static void check_if_tty(void) {
     not_on_tty = 1;
     return;
   }
-
+  
+  // 从stdout读取命令信息到 ws中
   if (ioctl(1, TIOCGWINSZ, &ws)) {
 
     if (errno == ENOTTY) {
@@ -7150,22 +7193,24 @@ static void usage(u8* argv0) {
 
 
 /* Prepare output directories and fds. */
-
+// 就是打开一些文件
 EXP_ST void setup_dirs_fds(void) {
 
   u8* tmp;
   s32 fd;
 
   ACTF("Setting up output directories...");
-
+  
+  // sync_dir => out
   if (sync_id && mkdir(sync_dir, 0700) && errno != EEXIST)
       PFATAL("Unable to create '%s'", sync_dir);
 
+  // sync_dir => out/master
   if (mkdir(out_dir, 0700)) {
-
+    // 创建失败
     if (errno != EEXIST) PFATAL("Unable to create '%s'", out_dir);
 
-    maybe_delete_out_dir();
+    maybe_delete_out_dir();// 已经存在就删个精光
 
   } else {
 
@@ -7272,7 +7317,7 @@ EXP_ST void setup_dirs_fds(void) {
 }
 
 
-/* Setup the output file for fuzzed data, if not using -f. */
+/* Setup the output file for fuzzed data, if not using -f(从给定的file中读入). */
 
 EXP_ST void setup_stdio_file(void) {
 
@@ -7438,7 +7483,7 @@ static void get_core_count(void) {
 
 #else
 
-#ifdef HAVE_AFFINITY
+#ifdef HAVE_AFFINITY // CPU affinity是指在多处理器系统中，进程或线程可以绑定到特定的CPU上运行，从而避免切换到其他CPU的开销
 
   cpu_core_count = sysconf(_SC_NPROCESSORS_ONLN);
 
@@ -7476,7 +7521,7 @@ static void get_core_count(void) {
 
     if (cpu_core_count > 1) {
 
-      if (cur_runnable > cpu_core_count * 1.5) {
+      if (cur_runnable > cpu_core_count * 1.5) {// 当前要跑的进程太多了 CPU过载
 
         WARNF("System under apparent load, performance may be spotty.");
 
@@ -7526,7 +7571,19 @@ static void fix_up_sync(void) {
   }
 
   if (strlen(sync_id) > 32) FATAL("Fuzzer ID too long");
-
+/*
+/home/squ/vuln-discovery/symcc_test/afl_out
+├── afl-master
+│   ├── crashes
+│   ├── fuzz_bitmap
+│   ├── fuzzer_stats
+│   ├── hangs
+│   ├── plot_data
+│   └── queue
+├── afl-slave
+    ····
+    这里其实就是生成 afl_out/afl-master
+*/
   x = alloc_printf("%s/%s", out_dir, sync_id);
 
   sync_dir = out_dir;
@@ -7534,7 +7591,7 @@ static void fix_up_sync(void) {
 
   if (!force_deterministic) {
     skip_deterministic = 1;
-    use_splicing = 1;
+    use_splicing = 1;       /* 不同测试用例组合(splice/recombine)起来 */
   }
 
 }
@@ -7578,7 +7635,7 @@ static void check_asan_opts(void) {
 } 
 
 
-/* Detect @@ in args. */
+/* Detect @@ in args. 从 -- target argv <- 这个位置开始查 */
 
 EXP_ST void detect_file_args(char** argv) {
 
@@ -7603,13 +7660,17 @@ EXP_ST void detect_file_args(char** argv) {
       /* Be sure that we're always using fully-qualified paths. */
 
       if (out_file[0] == '/') aa_subst = out_file;
-      else aa_subst = alloc_printf("%s/%s", cwd, out_file);
+      else aa_subst = alloc_printf("%s/%s", cwd, out_file);// out_file = "out/master/.cur_input"
 
       /* Construct a replacement argv value. */
-
-      *aa_loc = 0;
+      
+      /*
+        这里我推测是有这样的场景 -- target A-@@-B
+        这样被替换成 A-/home/out/.cur_input-B
+      */ 
+      *aa_loc = 0;// argv[i]被置0了 这里的argv[1] 字符串也没啥意义了 
       n_arg = alloc_printf("%s%s%s", argv[i], aa_subst, aa_loc + 2);
-      argv[i] = n_arg;
+      argv[i] = n_arg;// /home/squ/proj/AFL-debug/out/master/.cur_input
       *aa_loc = '@';
 
       if (out_file[0] != '/') ck_free(aa_subst);
@@ -7664,7 +7725,7 @@ EXP_ST void setup_signal_handlers(void) {
   /* Things we don't care about. */
 
   sa.sa_handler = SIG_IGN;
-  sigaction(SIGTSTP, &sa, NULL);
+  sigaction(SIGTSTP, &sa, NULL);// Ctrl-Z
   sigaction(SIGPIPE, &sa, NULL);
 
 }
@@ -7819,7 +7880,7 @@ int main(int argc, char** argv) {
           u8* c;
 
           if (sync_id) FATAL("Multiple -S or -M options not supported");
-          sync_id = ck_strdup(optarg);
+          sync_id = ck_strdup(optarg);// -M master => sync_id 就是 master
 
           if ((c = strchr(sync_id, ':'))) {
 
@@ -7827,11 +7888,11 @@ int main(int argc, char** argv) {
 
             if (sscanf(c + 1, "%u/%u", &master_id, &master_max) != 2 ||
                 !master_id || !master_max || master_id > master_max ||
-                master_max > 1000000) FATAL("Bogus master ID passed to -M");
+                master_max > 1000000) FATAL("Bogus master ID passed to -M");// 假冒的master ID
 
           }
 
-          force_deterministic = 1;
+          force_deterministic = 1;// TODO: 使用 -M 或 -S 选项时，需要确保 AFL 运行的结果是确定性的，以防止不同实例之间的竞争条件
 
         }
 
@@ -7852,7 +7913,7 @@ int main(int argc, char** argv) {
       case 'x': /* dictionary */
 
         if (extras_dir) FATAL("Multiple -x options not supported");
-        extras_dir = optarg;
+        extras_dir = optarg; // extras 通常指的是用户提供的、可能对测试产生影响的额外输入文件
         break;
 
       case 't': { /* timeout */
@@ -7860,12 +7921,16 @@ int main(int argc, char** argv) {
           u8 suffix = 0;
 
           if (timeout_given) FATAL("Multiple -t options not supported");
-
+          
+          /* sscanf的返回值是成功匹配的参数数量 */
           if (sscanf(optarg, "%u%c", &exec_tmout, &suffix) < 1 ||
               optarg[0] == '-') FATAL("Bad syntax used for -t");
 
           if (exec_tmout < 5) FATAL("Dangerously low value of -t");
 
+        /* 如果字符串中包含一个加号（+），则意味着执行超时时间将是动态的，AFL 将会记住执行某个测试用例所需的时间，
+            并在此基础上增加一些额外的时间作为下次执行该测试用例的超时时间。这种情况下，timeout_given 被设置为 2。
+            否则，超时时间将被视为固定值，并将其存储在 exec_tmout 变量中。在这种情况下，timeout_given 被设置为 1。*/
           if (suffix == '+') timeout_given = 2; else timeout_given = 1;
 
           break;
@@ -7944,23 +8009,23 @@ int main(int argc, char** argv) {
         if (in_bitmap) FATAL("Multiple -B options not supported");
 
         in_bitmap = optarg;
-        read_bitmap(in_bitmap);
+        read_bitmap(in_bitmap);// 提前加载一个bitmap
         break;
 
       case 'C': /* crash mode */
-
+        // 这个模式下 就是以能crash的testcase作为输入 不会crash的testcase会被拒绝
         if (crash_mode) FATAL("Multiple -C options not supported");
         crash_mode = FAULT_CRASH;
         break;
 
-      case 'n': /* dumb mode */
+      case 'n': /* dumb mode : 直接采用父子进程方式 舍弃forksrv */
 
         if (dumb_mode) FATAL("Multiple -n options not supported");
         if (getenv("AFL_DUMB_FORKSRV")) dumb_mode = 2; else dumb_mode = 1;
 
         break;
 
-      case 'T': /* banner */
+      case 'T': /* banner 可以展现在afl屏幕的最上方 */
 
         if (use_banner) FATAL("Multiple -T options not supported");
         use_banner = optarg;
@@ -7998,22 +8063,24 @@ int main(int argc, char** argv) {
 
   if (dumb_mode) {
 
+    /* crash-mode 和 dumb-mode 互斥 (TODO:这里可能是看forksrv的返回状态？*/
     if (crash_mode) FATAL("-C and -n are mutually exclusive");
     if (qemu_mode)  FATAL("-Q and -n are mutually exclusive");
 
   }
 
   if (getenv("AFL_NO_FORKSRV"))    no_forkserver    = 1;
-  if (getenv("AFL_NO_CPU_RED"))    no_cpu_meter_red = 1;
-  if (getenv("AFL_NO_ARITH"))      no_arith         = 1;
+  if (getenv("AFL_NO_CPU_RED"))    no_cpu_meter_red = 1;// AFL 会跟踪被测程序运行时消耗的 CPU 时间，并定期检查该时间是否超过了预设的阈值。 影响右下角的cpu利用率的显示 没啥用
+  if (getenv("AFL_NO_ARITH"))      no_arith         = 1;// 跳过变异的"arith 8/8"阶段 也没啥用 看不到禁用场景
   if (getenv("AFL_SHUFFLE_QUEUE")) shuffle_queue    = 1;
-  if (getenv("AFL_FAST_CAL"))      fast_cal         = 1;
+  if (getenv("AFL_FAST_CAL"))      fast_cal         = 1;// calibrate_case中进行更少的校准次数
 
   if (getenv("AFL_HANG_TMOUT")) {
     hang_tmout = atoi(getenv("AFL_HANG_TMOUT"));
     if (!hang_tmout) FATAL("Invalid value of AFL_HANG_TMOUT");
   }
-
+  
+  // dumb = 1 : 完全随机生成 放弃覆盖率引导 dumb = 2 : TODO allows afl-fuzz to run with "dummy" fork servers that don't output any instrumentation
   if (dumb_mode == 2 && no_forkserver)
     FATAL("AFL_DUMB_FORKSRV and AFL_NO_FORKSRV are mutually exclusive");
 
@@ -8052,30 +8119,30 @@ int main(int argc, char** argv) {
 
   if (extras_dir) load_extras(extras_dir);
 
-  if (!timeout_given) find_timeout();
+  if (!timeout_given) find_timeout();// 这个函数就session resume的时候有用
 
   detect_file_args(argv + optind + 1);
 
-  if (!out_file) setup_stdio_file();
+  if (!out_file) setup_stdio_file();// 如果不从-f给定的file中读入 就从cur_input读
 
-  check_binary(argv[optind]);
+  check_binary(argv[optind]);       // 根据对二进制中一些字符串签名的扫描 设置一些宏
 
   start_time = get_cur_time();
 
   if (qemu_mode)
-    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
+    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);// TODO:
   else
     use_argv = argv + optind;
 
-  perform_dry_run(use_argv);
+  perform_dry_run(use_argv);// 随便跑两下 生成top_rated 为cull做准备
 
-  cull_queue();
+  cull_queue();             // 找到能触发新路径的最小集testcase 标记为favor
 
   show_init_stats();
 
-  seek_to = find_start_position();
+  seek_to = find_start_position();// 只有在resume的时候才有用 去fuzz_state找到当前entry在链表中的索引值 比如第三个
 
-  write_stats_file(0, 0, 0);
+  write_stats_file(0, 0, 0);// 写 fuzz_state 文件
   save_auto();
 
   if (stop_soon) goto stop_fuzzing;
@@ -8088,20 +8155,20 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
-  while (1) {
+  while (1) {// 这里其实就是不停的 cull -> fuzz_one -> sync 就是fuzz的完整主体循环部分了 接受到了ctrl+c才退出
 
     u8 skipped_fuzz;
 
     cull_queue();
 
-    if (!queue_cur) {
+    if (!queue_cur) {// 第一次 初始化 并且 resume一下
 
       queue_cycle++;
       current_entry     = 0;
       cur_skipped_paths = 0;
       queue_cur         = queue;
 
-      while (seek_to) {
+      while (seek_to) {// resume的时候才用的 可以忽略
         current_entry++;
         seek_to--;
         queue_cur = queue_cur->next;
@@ -8117,11 +8184,11 @@ int main(int argc, char** argv) {
       /* If we had a full queue cycle with no new finds, try
          recombination strategies next. */
 
-      if (queued_paths == prev_queued) {
+      if (queued_paths == prev_queued) {// 如果我上一次执行的queue就是最后一个了 要采用splice了
 
         if (use_splicing) cycles_wo_finds++; else use_splicing = 1;
 
-      } else cycles_wo_finds = 0;
+      } else cycles_wo_finds = 0;// 这个也主要是防止resume的时候直接指向链表末尾了
 
       prev_queued = queued_paths;
 
@@ -8130,9 +8197,9 @@ int main(int argc, char** argv) {
 
     }
 
-    skipped_fuzz = fuzz_one(use_argv);
+    skipped_fuzz = fuzz_one(use_argv);// 返回1代表跳过了 0代表fuzz一次成功
 
-    if (!stop_soon && sync_id && !skipped_fuzz) {
+    if (!stop_soon && sync_id && !skipped_fuzz) {// 没收到ctrl-c信号 + 指定了并行fuzz + fuzz_one没有跳过而是正常运行
       
       if (!(sync_interval_cnt++ % SYNC_INTERVAL))
         sync_fuzzers(use_argv);
