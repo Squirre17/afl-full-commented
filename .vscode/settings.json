@@ -46,6 +46,8 @@
         "xtr1common": "cpp",
         "xutility": "cpp",
         "fstream": "cpp",
-        "array": "cpp"
+        "array": "cpp",
+        "if_bridge.h": "c",
+        "afl-qemu-cpu-inl.h": "c"
     }
 }

@@ -122,10 +122,10 @@ static void __afl_start_forkserver(void) {
     if (read(FORKSRV_FD, &was_killed, 4) != 4) _exit(1);
 
     /* If we stopped the child in persistent mode, but there was a race
-       condition and afl-fuzz already issued SIGKILL, write off the old
+       condition and afl-fuzz already issued SIGKILL, write off(报废) the old
        process. */
 
-    if (child_stopped && was_killed) {
+    if (child_stopped && was_killed) {//这里已经被kill了 但是在之前的执行中子进程停止了 这里有条件竞争 就报废
       child_stopped = 0;
       if (waitpid(child_pid, &status, 0) < 0) _exit(1);
     }
@@ -147,12 +147,12 @@ static void __afl_start_forkserver(void) {
   
       }
 
-    } else {
+    } else {/* 子进程停止了 */
 
       /* Special handling for persistent mode: if the child is alive but
          currently stopped, simply restart it with SIGCONT. */
 
-      kill(child_pid, SIGCONT);
+      kill(child_pid, SIGCONT);// 子进程继续
       child_stopped = 0;
 
     }
@@ -168,7 +168,7 @@ static void __afl_start_forkserver(void) {
        a successful run. In this case, we want to wake it up without forking
        again. */
 
-    if (WIFSTOPPED(status)) child_stopped = 1;
+    if (WIFSTOPPED(status)) child_stopped = 1;// persistent mode
 
     /* Relay wait status to pipe, then loop back. */
 
@@ -210,7 +210,7 @@ int __afl_persistent_loop(unsigned int max_cnt) {
 
     if (--cycle_cnt) {
 
-      raise(SIGSTOP);
+      raise(SIGSTOP);// 告诉父进程的waitpid 我们成功跑了一次 
 
       __afl_area_ptr[0] = 1;
       __afl_prev_loc = 0;
